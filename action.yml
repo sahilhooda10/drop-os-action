@@ -1,0 +1,104 @@
+name: DROP OS paid-access monitor
+description: Check Stripe payment, Supabase entitlement, and logged-in customer access without exporting credentials.
+inputs:
+  endpoint:
+    description: DROP OS run-ingestion HTTPS endpoint
+    required: true
+  staging-ingress-hosts:
+    description: Comma-separated exact staging hostnames permitted for run ingestion
+    required: true
+  project-id:
+    description: Registered DROP OS project identifier
+    required: true
+  contract-id:
+    description: Sealed paid-access contract identifier
+    required: true
+  contract-version:
+    description: Sealed contract version
+    required: true
+  spec-hash:
+    description: SHA-256 of the sealed contract specification
+    required: true
+  supersedes-run-id:
+    description: UUID of the prior DROP OS run when this is a verified successor
+    required: false
+    default: ""
+  stripe-customer-id:
+    description: Opaque Stripe test-customer identifier
+    required: true
+  stripe-price-id:
+    description: Opaque Stripe price identifier expected for this contract
+    required: true
+  supabase-url:
+    description: Canonical customer staging Supabase project URL
+    required: true
+  staging-supabase-project-ref:
+    description: Exact 20-character project ref for the separate staging Supabase project
+    required: true
+  supabase-rpc:
+    description: Narrow entitlement RPC installed by the customer
+    default: dropos_read_entitlement
+  supabase-schema:
+    description: Explicit entitlement RPC schema; never inferred from a connection
+    default: public
+  browser-login-url:
+    description: Staging sign-in page
+    required: true
+  browser-access-url:
+    description: Protected staging page whose access is verified
+    required: true
+  staging-network-hosts:
+    description: Comma-separated exact staging hostnames permitted for every browser request
+    required: true
+  email-selector:
+    description: CSS selector for the dedicated test-account email field
+    default: input[type="email"]
+  password-selector:
+    description: CSS selector for the dedicated test-account password field
+    default: input[type="password"]
+  submit-selector:
+    description: CSS selector for the sign-in submit control
+    default: button[type="submit"]
+  success-selector:
+    description: CSS selector visible only to an entitled account
+    required: true
+  timeout-ms:
+    description: Per-browser-step timeout in milliseconds
+    default: "20000"
+  convergence-retries:
+    description: Maximum same-deployment follow-ups while systems settle
+    default: "2"
+  convergence-max-wait-ms:
+    description: Maximum total time allowed for bounded convergence
+    default: "120000"
+runs:
+  using: composite
+  steps:
+    - name: Verify paid access
+      shell: bash
+      env:
+        DROP_OS_TARGET_ENVIRONMENT: staging
+        DROP_OS_ENDPOINT: ${{ inputs.endpoint }}
+        DROP_OS_STAGING_INGRESS_HOSTS: ${{ inputs.staging-ingress-hosts }}
+        DROP_OS_PROJECT_ID: ${{ inputs.project-id }}
+        DROP_OS_CONTRACT_ID: ${{ inputs.contract-id }}
+        DROP_OS_CONTRACT_VERSION: ${{ inputs.contract-version }}
+        DROP_OS_SPEC_HASH: ${{ inputs.spec-hash }}
+        DROP_OS_SUPERSEDES_RUN_ID: ${{ inputs.supersedes-run-id }}
+        DROP_OS_STRIPE_CUSTOMER_ID: ${{ inputs.stripe-customer-id }}
+        DROP_OS_STRIPE_PRICE_ID: ${{ inputs.stripe-price-id }}
+        DROP_OS_STAGING_SUPABASE_PROJECT_REF: ${{ inputs.staging-supabase-project-ref }}
+        DROP_OS_SUPABASE_URL: ${{ inputs.supabase-url }}
+        DROP_OS_SUPABASE_SCHEMA: ${{ inputs.supabase-schema }}
+        DROP_OS_SUPABASE_RPC: ${{ inputs.supabase-rpc }}
+        DROP_OS_BROWSER_LOGIN_URL: ${{ inputs.browser-login-url }}
+        DROP_OS_BROWSER_ACCESS_URL: ${{ inputs.browser-access-url }}
+        DROP_OS_STAGING_NETWORK_HOSTS: ${{ inputs.staging-network-hosts }}
+        DROP_OS_EMAIL_SELECTOR: ${{ inputs.email-selector }}
+        DROP_OS_PASSWORD_SELECTOR: ${{ inputs.password-selector }}
+        DROP_OS_SUBMIT_SELECTOR: ${{ inputs.submit-selector }}
+        DROP_OS_SUCCESS_SELECTOR: ${{ inputs.success-selector }}
+        DROP_OS_BROWSER_TIMEOUT_MS: ${{ inputs.timeout-ms }}
+        DROP_OS_CONVERGENCE_RETRIES: ${{ inputs.convergence-retries }}
+        DROP_OS_CONVERGENCE_MAX_WAIT_MS: ${{ inputs.convergence-max-wait-ms }}
+      run: node "$GITHUB_ACTION_PATH/runner/index.mjs"
