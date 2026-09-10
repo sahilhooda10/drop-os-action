@@ -32,6 +32,19 @@ function chromePath() {
   throw new Error("chrome_not_available");
 }
 
+/** Starting Chrome and getting its first page target is OUR tooling coming up, not
+ * the customer's application answering. It shares a GitHub-hosted runner with
+ * everything else on that machine, and on a loaded one a cold start can exceed the
+ * twenty seconds a customer sensibly sets for a page interaction. When it did, the
+ * check reported browser_debug_endpoint_browser_timeout and the run became
+ * COULD_NOT_VERIFY: correct, in that an unreachable observer must never read as a
+ * pass, but wrong about the cause — nothing was wrong with the customer's access.
+ * Startup therefore gets its own allowance, and a customer who sets a longer one
+ * still gets theirs. */
+const BROWSER_START_TIMEOUT_MS = 60_000;
+export const browserStartupTimeoutMs = configuredMs =>
+  Math.max(Number(configuredMs) || 0, BROWSER_START_TIMEOUT_MS);
+
 async function waitFor(getValue, timeoutMs, assertSafe = () => undefined) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -478,7 +491,7 @@ export async function checkBrowserAccess(config) {
     const [port, browserPath] = await waitFor(async () => {
       const lines = readFileSync(portFile, "utf8").trim().split("\n");
       return lines.length >= 2 ? lines : null;
-    }, config.browserTimeoutMs);
+    }, browserStartupTimeoutMs(config.browserTimeoutMs));
     if (!/^\d+$/.test(port) || !browserPath.startsWith("/devtools/browser/")) {
       throw new Error("browser_debug_endpoint_invalid");
     }
@@ -488,7 +501,7 @@ export async function checkBrowserAccess(config) {
     currentStage = "network_boundary";
     requestBoundary = await installBrowserRequestBoundary(cdp, config);
     currentStage = "page_session";
-    const { sessionId } = await requestBoundary.waitForPageSession(config.browserTimeoutMs);
+    const { sessionId } = await requestBoundary.waitForPageSession(browserStartupTimeoutMs(config.browserTimeoutMs));
     await requestBoundary.settle();
 
     const stagingOrigin = new URL(config.browserLoginUrl).origin;
