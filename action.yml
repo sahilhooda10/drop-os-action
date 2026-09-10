@@ -4,9 +4,20 @@ inputs:
   endpoint:
     description: DROP OS run-ingestion HTTPS endpoint
     required: true
+  target-environment:
+    description: >-
+      Which of your environments this check is taken against: staging or production.
+      Opt in to production deliberately; it is never inferred, and a production check
+      requires a live-mode RESTRICTED Stripe key and a dedicated account you control.
+    default: staging
+  ingress-hosts:
+    description: Comma-separated exact hostnames permitted for run ingestion
+    required: false
+    default: ""
   staging-ingress-hosts:
-    description: Comma-separated exact staging hostnames permitted for run ingestion
-    required: true
+    description: Previous name for ingress-hosts, still accepted so an older pinned installation keeps working
+    required: false
+    default: ""
   project-id:
     description: Registered DROP OS project identifier
     required: true
@@ -24,17 +35,22 @@ inputs:
     required: false
     default: ""
   stripe-customer-id:
-    description: Opaque Stripe test-customer identifier
+    description: Opaque Stripe customer identifier, in the mode of the chosen environment
     required: true
   stripe-price-id:
     description: Opaque Stripe price identifier expected for this contract
     required: true
   supabase-url:
-    description: Canonical customer staging Supabase project URL
+    description: Canonical customer Supabase project URL for the chosen environment
     required: true
+  supabase-project-ref:
+    description: Exact 20-character Supabase project ref holding the entitlement function
+    required: false
+    default: ""
   staging-supabase-project-ref:
-    description: Exact 20-character project ref for the separate staging Supabase project
-    required: true
+    description: Previous name for supabase-project-ref, still accepted so an older pinned installation keeps working
+    required: false
+    default: ""
   supabase-rpc:
     description: Narrow entitlement RPC installed by the customer
     default: dropos_read_entitlement
@@ -42,14 +58,19 @@ inputs:
     description: Explicit entitlement RPC schema; never inferred from a connection
     default: public
   browser-login-url:
-    description: Staging sign-in page
+    description: Sign-in page of the application being checked
     required: true
   browser-access-url:
     description: Protected staging page whose access is verified
     required: true
+  network-hosts:
+    description: Comma-separated exact hostnames the browser check may contact
+    required: false
+    default: ""
   staging-network-hosts:
-    description: Comma-separated exact staging hostnames permitted for every browser request
-    required: true
+    description: Previous name for network-hosts, still accepted so an older pinned installation keeps working
+    required: false
+    default: ""
   email-selector:
     description: CSS selector for the dedicated test-account email field
     default: input[type="email"]
@@ -77,8 +98,9 @@ runs:
     - name: Verify paid access
       shell: bash
       env:
-        DROP_OS_TARGET_ENVIRONMENT: staging
+        DROP_OS_TARGET_ENVIRONMENT: ${{ inputs.target-environment }}
         DROP_OS_ENDPOINT: ${{ inputs.endpoint }}
+        DROP_OS_INGRESS_HOSTS: ${{ inputs.ingress-hosts }}
         DROP_OS_STAGING_INGRESS_HOSTS: ${{ inputs.staging-ingress-hosts }}
         DROP_OS_PROJECT_ID: ${{ inputs.project-id }}
         DROP_OS_CONTRACT_ID: ${{ inputs.contract-id }}
@@ -87,12 +109,14 @@ runs:
         DROP_OS_SUPERSEDES_RUN_ID: ${{ inputs.supersedes-run-id }}
         DROP_OS_STRIPE_CUSTOMER_ID: ${{ inputs.stripe-customer-id }}
         DROP_OS_STRIPE_PRICE_ID: ${{ inputs.stripe-price-id }}
+        DROP_OS_SUPABASE_PROJECT_REF: ${{ inputs.supabase-project-ref }}
         DROP_OS_STAGING_SUPABASE_PROJECT_REF: ${{ inputs.staging-supabase-project-ref }}
         DROP_OS_SUPABASE_URL: ${{ inputs.supabase-url }}
         DROP_OS_SUPABASE_SCHEMA: ${{ inputs.supabase-schema }}
         DROP_OS_SUPABASE_RPC: ${{ inputs.supabase-rpc }}
         DROP_OS_BROWSER_LOGIN_URL: ${{ inputs.browser-login-url }}
         DROP_OS_BROWSER_ACCESS_URL: ${{ inputs.browser-access-url }}
+        DROP_OS_NETWORK_HOSTS: ${{ inputs.network-hosts }}
         DROP_OS_STAGING_NETWORK_HOSTS: ${{ inputs.staging-network-hosts }}
         DROP_OS_EMAIL_SELECTOR: ${{ inputs.email-selector }}
         DROP_OS_PASSWORD_SELECTOR: ${{ inputs.password-selector }}

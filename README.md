@@ -6,8 +6,9 @@ anyone who installs it. The DROP OS product itself stays private.
 
 ## What it does
 
-On a real deployment of your staging application, it observes three things from your own
-providers and sends DROP OS only scalar facts plus a digest of the browser check:
+On a real deployment of your application — staging or production, whichever this project
+registered — it observes three things from your own providers and sends DROP OS only scalar facts
+plus a digest of the browser check:
 
 1. whether the customer's paid period is active in Stripe,
 2. whether your application grants that account an entitlement,
@@ -49,7 +50,39 @@ assumes `public.profiles(id, plan)` and must be reviewed against your own schema
 `security invoker`, so your row-level security still applies, and it grants execution only to
 `authenticated`. If your function lives in another schema, pass `supabase-schema`.
 
+## Checking production
+
+Production is opt-in and never inferred. A workflow that says nothing is a staging workflow; DROP
+OS writes `target-environment: "production"` into the generated file only for a project registered
+that way, and the server refuses a production check against a staging project and the reverse.
+
+Checking production means two live things run on every deployment, and both stay in your GitHub
+environment:
+
+- a **live-mode RESTRICTED Stripe key** (`rk_live_`), scoped to reading subscriptions. A full `sk_`
+  secret is refused in either environment, and a test key is refused for a production check;
+- a **sign-in as a dedicated account you create and control**. Use an account that exists only to
+  be checked, never a real customer's, and give it the narrowest entitlement that still proves paid
+  access.
+
+Every check also carries a digest of the subject it is configured against — billing customer,
+price, entitlement project and RPC, and protected page. DROP OS pins that on the first check and
+refuses a different one afterwards, so a check quietly repointed at another customer is rejected
+rather than answered.
+
+## What the server verifies, and what you assert
+
+The server verifies the signed GitHub identity of the run, that the deployment happened, that the
+contract text is the one sealed for your project, that the environment matches the one you
+registered, and that the subject has not changed since the last check. The verdict is derived on
+the server from the observations; the runner's own claim is recorded but never used as the result.
+
+You assert that the Stripe customer, the application account and the protected page belong to the
+same person. DROP OS cannot verify that, and the three observations agreeing is not evidence of
+it — they can agree perfectly about two different people. Prove that binding once yourself during
+setup by pointing the check at a deliberately mismatched customer and confirming it does not pass.
+
 ## Support and scope
 
-This action is for staging environments. It refuses live Stripe keys, service-role Supabase keys
-and production DROP OS hosts, before any network call.
+The action refuses full Stripe secret keys, service-role Supabase keys, and the DROP OS production
+hosts and project, before any network call.

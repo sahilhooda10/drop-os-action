@@ -6,9 +6,9 @@ This directory is the inspectable customer-controlled runner for Truth V1. `acti
 
 Configure these as GitHub Actions secrets. They are read by `runner/index.mjs`, masked immediately, used only against the customer's providers, and never included in the run envelope:
 
-- `DROP_OS_STRIPE_RESTRICTED_KEY` — Stripe test-mode restricted **read-only** key (`rk_test_`). Full `sk_` keys and every `rk_live_` key are refused before Stripe is called.
+- `DROP_OS_STRIPE_RESTRICTED_KEY` — a Stripe **restricted, read-only** key in the mode of the environment being checked: `rk_test_` for staging, `rk_live_` for production. Full `sk_` keys are refused in both, and the wrong mode for the chosen environment is refused before Stripe is called.
 - `DROP_OS_SUPABASE_PUBLISHABLE_KEY` — current `sb_publishable_` key. A service key is refused.
-- `DROP_OS_TEST_EMAIL` and `DROP_OS_TEST_PASSWORD` — dedicated non-human staging account.
+- `DROP_OS_TEST_EMAIL` and `DROP_OS_TEST_PASSWORD` — a dedicated non-human account the customer creates and controls. For a production check this is a real account in a live system: it should exist only to be checked, hold the narrowest entitlement that still proves paid access, and be rotated like any other credential.
 
 GitHub OIDC authenticates each run to DROP OS with audience `dropos-truth-v1`. There is no permanent DROP OS runner token.
 The runner sends GitHub's OIDC request credential only to an HTTPS host under `*.actions.githubusercontent.com`; a redirected or malformed request URL is refused before any network call.
@@ -41,3 +41,5 @@ Two limits are worth stating plainly, because they are the ones a reader would o
 
 - **Nobody outside the author's own GitHub account has installed it.** Every end-to-end proof so far ran in repositories the author owns. Unaided third-party onboarding is untested.
 - **The Stripe customer and the application account are bound by hand at onboarding.** V1 cannot independently prove that a customer selected the matching Stripe identity, so the first end-to-end setup should include a deliberate mismatch as a negative control. Pointing the check at the wrong Stripe customer proves your configuration is wrong; it does not prove a customer kept access after paying stopped.
+
+  What the server does enforce is continuity: every check carries a digest over the environment, billing customer, price, entitlement project, schema and RPC, and protected page. The first check pins it; a later check configured against anything else is refused. Three observers agreeing is not identity — they can agree perfectly about two different people — and this binding does not claim otherwise. It claims only that nobody quietly repointed the check.

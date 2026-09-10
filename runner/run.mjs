@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readBoundedJson, safeFetch } from "./http.mjs";
 import { assertIngressStagingTarget } from "./config.mjs";
 
@@ -77,6 +78,40 @@ export function claimedVerdict(observers) {
   return "PASS";
 }
 
+/**
+ * A digest over the subject this check is configured against.
+ *
+ * The server pins it the first time it sees one and refuses a different one after
+ * that, so a check silently repointed at another customer, price, database or page
+ * is rejected rather than quietly producing a verdict about somebody else.
+ *
+ * It is a digest, so none of these identifiers leaves the runner. And it proves
+ * exactly one thing: that this check is configured the same way the last one was.
+ * It does NOT prove that the billing customer and the application account are the
+ * same person. Nothing in V1 does, and the three observers agreeing does not
+ * either — they can agree perfectly about two different people.
+ */
+export function subjectDigest(config) {
+  const raw = String(config.browserAccessUrl ?? "");
+  let page = raw;
+  try {
+    const access = new URL(raw);
+    // Origin and path only: a query string or fragment is not part of who is
+    // being checked, and including one would break the pin on a harmless edit.
+    page = `${access.origin}${access.pathname}`;
+  } catch { /* an unparseable value is digested as given */ }
+  const part = value => String(value ?? "");
+  return createHash("sha256").update([
+    part(config.targetEnvironment),
+    part(config.stripeCustomerId),
+    part(config.stripePriceId),
+    part(config.stagingSupabaseProjectRef),
+    part(config.supabaseSchema ?? "public"),
+    part(config.supabaseRpc),
+    page
+  ].join("\n"), "utf8").digest("hex");
+}
+
 export function buildEnvelope(config, observers, startedAt, finishedAt) {
   const verdict = claimedVerdict(observers);
   const convergenceAttempt = Number(config.convergenceAttempt ?? 0);
@@ -92,6 +127,8 @@ export function buildEnvelope(config, observers, startedAt, finishedAt) {
     kind: config.runKind,
     ...(config.supersedesRunId ? { supersedesRunId: config.supersedesRunId } : {}),
     commitSha: config.commitSha,
+    targetEnvironment: config.targetEnvironment,
+    subjectDigest: subjectDigest(config),
     verdict,
     reasons: verdict === "PASS" ? ["all_assertions_held"] : [verdict === "CONTRADICTION" ? "observer_values_disagree" : "observer_unavailable"],
     observers,

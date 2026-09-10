@@ -20,18 +20,21 @@ jobs:
         uses: OWNER/DROP_OS_REPOSITORY@PINNED_40_CHARACTER_COMMIT_SHA
         with:
           endpoint: https://YOUR_DROP_OS_HOST/api/truth/runs
-          staging-ingress-hosts: YOUR_DROP_OS_HOST
+          # staging or production. Never inferred; DROP OS writes the one your
+          # project registered into the file it generates for you.
+          target-environment: staging
+          ingress-hosts: YOUR_DROP_OS_HOST
           project-id: YOUR_PROJECT_ID
           contract-id: YOUR_CONTRACT_ID
           contract-version: "1"
           spec-hash: YOUR_64_CHARACTER_SPEC_HASH
           stripe-customer-id: cus_YOUR_DEDICATED_TEST_CUSTOMER
           stripe-price-id: price_YOUR_EXPECTED_PRICE
-          staging-supabase-project-ref: YOUR_20_CHARACTER_STAGING_REF
-          supabase-url: https://YOUR_20_CHARACTER_STAGING_REF.supabase.co
+          supabase-project-ref: YOUR_20_CHARACTER_PROJECT_REF
+          supabase-url: https://YOUR_20_CHARACTER_PROJECT_REF.supabase.co
           browser-login-url: https://staging.example.com/login
           browser-access-url: https://staging.example.com/pro
-          staging-network-hosts: staging.example.com,YOUR_20_CHARACTER_STAGING_REF.supabase.co
+          network-hosts: staging.example.com,YOUR_20_CHARACTER_PROJECT_REF.supabase.co
           success-selector: '[data-dropos-access="pro"]'
         env:
           STRIPE_RESTRICTED_KEY: ${{ secrets.DROP_OS_STRIPE_RESTRICTED_KEY }}

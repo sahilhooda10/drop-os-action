@@ -6,7 +6,11 @@ const RPC = /^[a-z][a-z0-9_]{0,62}$/;
 const SUPABASE_SCHEMA = /^[a-z_][a-z0-9_]{0,62}$/;
 const STRIPE_CUSTOMER = /^cus_[A-Za-z0-9]{8,}$/;
 const STRIPE_PRICE = /^price_[A-Za-z0-9]{8,}$/;
-const STRIPE_TEST_RESTRICTED_KEY = /^rk_test_[A-Za-z0-9]{16,}$/;
+const STRIPE_RESTRICTED_KEY = {
+  staging: /^rk_test_[A-Za-z0-9]{16,}$/,
+  production: /^rk_live_[A-Za-z0-9]{16,}$/
+};
+const TARGET_ENVIRONMENT = /^(staging|production)$/;
 const SUPABASE_PUBLISHABLE_KEY = /^sb_publishable_[A-Za-z0-9_-]{16,}$/;
 const SUPABASE_PROJECT_REF = /^[a-z0-9]{20}$/;
 const PRODUCTION_SUPABASE_PROJECT_REF = "zuvxiosuhqpsczjimwwl";
@@ -28,6 +32,21 @@ export class RunnerConfigurationError extends Error {
 
 function required(env, name) {
   const value = String(env[name] ?? "").trim();
+  if (!value) throw new RunnerConfigurationError(`configuration_missing:${name.toLowerCase()}`);
+  return value;
+}
+
+/**
+ * Read the current name, falling back to the one it replaced.
+ *
+ * Three inputs were called `staging-*` when staging was the only thing this could
+ * check. They now describe the environment a customer chose, so the names dropped
+ * the word — but a workflow installed against an older pinned commit still sends
+ * the old ones, and moving a pin should never break a working check. New names win
+ * where both are present.
+ */
+function requiredEither(env, name, previousName) {
+  const value = String(env[name] ?? "").trim() || String(env[previousName] ?? "").trim();
   if (!value) throw new RunnerConfigurationError(`configuration_missing:${name.toLowerCase()}`);
   return value;
 }
@@ -66,8 +85,8 @@ function exactHostnameAllowlist(value, code) {
   return Object.freeze(hosts);
 }
 
-const stagingIngressHosts = value => exactHostnameAllowlist(value, "ingress_host_allowlist_invalid");
-const stagingNetworkHosts = value => exactHostnameAllowlist(value, "network_host_allowlist_invalid");
+const ingressHosts = value => exactHostnameAllowlist(value, "ingress_host_allowlist_invalid");
+const networkHosts = value => exactHostnameAllowlist(value, "network_host_allowlist_invalid");
 
 function productionHostRefused(host) {
   return PRODUCTION_DROP_OS_HOSTS.has(host) || host.includes(PRODUCTION_SUPABASE_PROJECT_REF);
@@ -82,21 +101,38 @@ function parsedHttpsUrl(value, code) {
   return url;
 }
 
-function assertStagingEnvironment(config) {
-  if (config.targetEnvironment !== "staging") {
-    throw new RunnerConfigurationError("target_environment_not_staging");
+function assertKnownEnvironment(config) {
+  if (!TARGET_ENVIRONMENT.test(String(config.targetEnvironment ?? ""))) {
+    throw new RunnerConfigurationError("target_environment_invalid");
+  }
+  return config.targetEnvironment;
+}
+
+/**
+ * The billing credential, held to the mode of the environment being checked.
+ *
+ * Both modes require a RESTRICTED key. `rk_` is the whole point: a restricted key
+ * can be scoped to reading subscriptions and nothing else, and a full `sk_` secret
+ * is refused in either environment. Checking production means holding a live
+ * credential in the customer's own GitHub environment, so the narrowest possible
+ * one is the only acceptable shape.
+ */
+export function assertStripeTarget(config) {
+  const environment = assertKnownEnvironment(config);
+  const key = String(config.stripeKey ?? "");
+  if (/^sk_/.test(key)) throw new RunnerConfigurationError("stripe_key_not_restricted");
+  if (!STRIPE_RESTRICTED_KEY[environment].test(key)) {
+    throw new RunnerConfigurationError(
+      environment === "production" ? "stripe_key_not_live_restricted" : "stripe_key_not_test_restricted"
+    );
   }
 }
 
-export function assertStripeStagingTarget(config) {
-  assertStagingEnvironment(config);
-  if (!STRIPE_TEST_RESTRICTED_KEY.test(String(config.stripeKey ?? ""))) {
-    throw new RunnerConfigurationError("stripe_key_not_test_restricted");
-  }
-}
+/** Retained name, unchanged meaning for staging callers. */
+export const assertStripeStagingTarget = assertStripeTarget;
 
 export function assertIngressStagingTarget(config) {
-  assertStagingEnvironment(config);
+  assertKnownEnvironment(config);
   const allowedHosts = config.ingressAllowedHosts;
   if (!Array.isArray(allowedHosts) || allowedHosts.length < 1 || allowedHosts.length > 20 ||
       allowedHosts.some(host => typeof host !== "string" || !DNS_HOSTNAME.test(host) || host !== host.toLowerCase()) ||
@@ -116,7 +152,7 @@ export function assertIngressStagingTarget(config) {
 }
 
 export function assertSupabaseStagingTarget(config) {
-  assertStagingEnvironment(config);
+  assertKnownEnvironment(config);
   const projectRef = String(config.stagingSupabaseProjectRef ?? "");
   if (!SUPABASE_PROJECT_REF.test(projectRef)) {
     throw new RunnerConfigurationError("supabase_project_ref_invalid");
@@ -131,7 +167,7 @@ export function assertSupabaseStagingTarget(config) {
 }
 
 export function assertBrowserStagingTarget(config) {
-  assertStagingEnvironment(config);
+  assertKnownEnvironment(config);
   const allowedHosts = config.networkAllowedHosts;
   if (!Array.isArray(allowedHosts) || allowedHosts.length < 1 || allowedHosts.length > 20 ||
       allowedHosts.some(host => typeof host !== "string" || !DNS_HOSTNAME.test(host) || host !== host.toLowerCase()) ||
@@ -181,9 +217,11 @@ export function readRunnerConfig(env = process.env) {
   const proposedPredecessor = String(env.DROP_OS_SUPERSEDES_RUN_ID ?? "").trim();
 
   const config = {
-    targetEnvironment: matching(required(env, "DROP_OS_TARGET_ENVIRONMENT"), /^staging$/, "target_environment_not_staging"),
+    // Opt-in, and never inferred. A workflow that says nothing is a staging
+    // workflow, so no installation starts checking a live application by accident.
+    targetEnvironment: matching(required(env, "DROP_OS_TARGET_ENVIRONMENT"), TARGET_ENVIRONMENT, "target_environment_invalid"),
     endpoint: httpsUrl(required(env, "DROP_OS_ENDPOINT"), "endpoint_invalid"),
-    ingressAllowedHosts: stagingIngressHosts(required(env, "DROP_OS_STAGING_INGRESS_HOSTS")),
+    ingressAllowedHosts: ingressHosts(requiredEither(env, "DROP_OS_INGRESS_HOSTS", "DROP_OS_STAGING_INGRESS_HOSTS")),
     projectId: matching(required(env, "DROP_OS_PROJECT_ID"), ID, "project_id_invalid"),
     contractId: matching(required(env, "DROP_OS_CONTRACT_ID"), ID, "contract_id_invalid"),
     contractVersion: boundedInteger(required(env, "DROP_OS_CONTRACT_VERSION"), 1, 1_000_000, "contract_version_invalid"),
@@ -210,8 +248,17 @@ export function readRunnerConfig(env = process.env) {
     githubRunAttempt: matching(required(env, "GITHUB_RUN_ATTEMPT"), /^\d{1,10}$/, "github_run_attempt_invalid"),
     stripeCustomerId: matching(required(env, "DROP_OS_STRIPE_CUSTOMER_ID"), STRIPE_CUSTOMER, "stripe_customer_id_invalid"),
     stripePriceId: matching(required(env, "DROP_OS_STRIPE_PRICE_ID"), STRIPE_PRICE, "stripe_price_id_invalid"),
-    stripeKey: matching(required(env, "STRIPE_RESTRICTED_KEY"), STRIPE_TEST_RESTRICTED_KEY, "stripe_key_not_test_restricted"),
-    stagingSupabaseProjectRef: matching(required(env, "DROP_OS_STAGING_SUPABASE_PROJECT_REF"), SUPABASE_PROJECT_REF, "supabase_project_ref_invalid"),
+    // Held to the mode of the environment being checked, at read time as well as
+    // before the first Stripe call, so a live key can never reach a staging check
+    // and a test key can never be mistaken for evidence about a live application.
+    stripeKey: matching(
+      required(env, "STRIPE_RESTRICTED_KEY"),
+      STRIPE_RESTRICTED_KEY[String(env.DROP_OS_TARGET_ENVIRONMENT ?? "").trim()] ?? STRIPE_RESTRICTED_KEY.staging,
+      String(env.DROP_OS_TARGET_ENVIRONMENT ?? "").trim() === "production"
+        ? "stripe_key_not_live_restricted"
+        : "stripe_key_not_test_restricted"
+    ),
+    stagingSupabaseProjectRef: matching(requiredEither(env, "DROP_OS_SUPABASE_PROJECT_REF", "DROP_OS_STAGING_SUPABASE_PROJECT_REF"), SUPABASE_PROJECT_REF, "supabase_project_ref_invalid"),
     supabaseUrl: httpsUrl(required(env, "DROP_OS_SUPABASE_URL"), "supabase_url_invalid"),
     supabaseRpc: matching(required(env, "DROP_OS_SUPABASE_RPC"), RPC, "supabase_rpc_invalid"),
     supabaseSchema: matching(String(env.DROP_OS_SUPABASE_SCHEMA ?? "public").trim(), SUPABASE_SCHEMA, "supabase_schema_invalid"),
@@ -220,7 +267,7 @@ export function readRunnerConfig(env = process.env) {
     testPassword: required(env, "DROP_OS_TEST_PASSWORD"),
     browserLoginUrl: httpsUrl(required(env, "DROP_OS_BROWSER_LOGIN_URL"), "browser_login_url_invalid"),
     browserAccessUrl: httpsUrl(required(env, "DROP_OS_BROWSER_ACCESS_URL"), "browser_access_url_invalid"),
-    networkAllowedHosts: stagingNetworkHosts(required(env, "DROP_OS_STAGING_NETWORK_HOSTS")),
+    networkAllowedHosts: networkHosts(requiredEither(env, "DROP_OS_NETWORK_HOSTS", "DROP_OS_STAGING_NETWORK_HOSTS")),
     emailSelector: required(env, "DROP_OS_EMAIL_SELECTOR"),
     passwordSelector: required(env, "DROP_OS_PASSWORD_SELECTOR"),
     submitSelector: required(env, "DROP_OS_SUBMIT_SELECTOR"),
