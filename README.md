@@ -19,7 +19,11 @@ or raw evidence. See `runner/README.md` for the full boundary description.
 ## Requirements
 
 - A GitHub-hosted Ubuntu runner. **No npm dependencies**: the runner uses only Node built-ins.
-- Node 24, installed by the workflow DROP OS generates for you.
+- **Node 22 or newer.** The browser check opens a Chrome DevTools connection with the global
+  `WebSocket`, which Node enables by default from 22. `ubuntu-latest` currently provides Node 24,
+  so the generated workflow installs nothing to get it, and the runner checks its own version and
+  refuses with `node_22_required` before making any network call. If you pin a different Node in
+  your own workflow, keep it at 22 or above.
 - Four repository secrets, described in `runner/README.md`.
 
 ## Installation
@@ -32,7 +36,7 @@ observer secrets.
 Pin this action by commit, never by branch or tag:
 
 ```yaml
-- uses: OWNER/REPOSITORY@<40-character commit sha>
+- uses: sahilhooda10/drop-os-action@<40-character commit sha>
 ```
 
 The workflow DROP OS generates already contains the exact pinned reference. Do not replace it

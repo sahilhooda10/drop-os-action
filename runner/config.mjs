@@ -169,8 +169,14 @@ export function assertRunnerStagingTargets(config) {
 }
 
 export function readRunnerConfig(env = process.env) {
+  // The browser observer opens a CDP connection with the GLOBAL WebSocket, which is
+  // only enabled by default from Node 22. Accepting Node 20 here let the run pass
+  // configuration, contact Stripe and the entitlement RPC, and then fail inside the
+  // browser check with "WebSocket is not defined" — a confusing failure, after the
+  // customer's providers had already been called. The floor now matches what the
+  // runner actually needs, and it is refused before any network call.
   const nodeMajor = Number(process.versions.node.split(".")[0]);
-  if (nodeMajor < 20) throw new RunnerConfigurationError("node_20_required");
+  if (nodeMajor < 22) throw new RunnerConfigurationError("node_22_required");
 
   const proposedPredecessor = String(env.DROP_OS_SUPERSEDES_RUN_ID ?? "").trim();
 

@@ -25,7 +25,7 @@ The Action requires the exact 20-character staging project ref separately and bi
 
 ## Browser check
 
-The Action starts the Chrome already installed on `ubuntu-latest`, signs in through customer-supplied CSS selectors, navigates to the protected route and checks for an access-only selector. It does not collect HTML or screenshots. Evidence is a SHA-256 digest over a small generated JSON statement (`access_granted` and check kind), never page content.
+The Action starts the Chrome already installed on `ubuntu-latest` and talks to it over a Chrome DevTools WebSocket, which is why the runner requires Node 22 or newer and refuses anything older before its first network call. It signs in through customer-supplied CSS selectors, navigates to the protected route and checks for an access-only selector. It does not collect HTML or screenshots. Evidence is a SHA-256 digest over a small generated JSON statement (`access_granted` and check kind), never page content.
 
 Customers provide one explicit browser network-host allowlist. It must include the staging application host and the canonical `<staging-ref>.supabase.co` host; any additional asset or API host must be named exactly. Login and protected URLs must be HTTPS, have no credentials or fragments, share one origin, use the default HTTPS port, and match the allowlist. Production DROP OS hosts and the production Supabase ref are hard-denied.
 
@@ -35,6 +35,9 @@ See `examples/workflow.yml`. Customers must pin `uses:` to the immutable commit 
 
 ## Current proof boundary
 
-Provider calls and GitHub have not yet run in a real Actions job. Unit tests use bounded synthetic responses. The browser module has not yet run against a real staging login. The Action is implemented, but it is not release-proven until the connected-repository workflow succeeds end to end.
+The Action has run end to end in real GitHub Actions jobs: a real deployment, a signed OIDC identity, a Stripe test-mode restricted key, a real Supabase staging project, a real browser sign-in, and a verdict derived on the DROP OS server rather than in the runner. The most recent of those installed this Action from its published commit exactly as a customer does.
 
-The configured Stripe test customer and Supabase/browser account are manually bound during onboarding. V1 cannot independently prove that a customer selected the matching Stripe identity; the first end-to-end setup must include a deliberate mismatch negative control.
+Two limits are worth stating plainly, because they are the ones a reader would otherwise assume away:
+
+- **Nobody outside the author's own GitHub account has installed it.** Every end-to-end proof so far ran in repositories the author owns. Unaided third-party onboarding is untested.
+- **The Stripe customer and the application account are bound by hand at onboarding.** V1 cannot independently prove that a customer selected the matching Stripe identity, so the first end-to-end setup should include a deliberate mismatch as a negative control. Pointing the check at the wrong Stripe customer proves your configuration is wrong; it does not prove a customer kept access after paying stopped.
