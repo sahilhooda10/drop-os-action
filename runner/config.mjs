@@ -166,6 +166,19 @@ export function assertSupabaseStagingTarget(config) {
   }
 }
 
+/** The release endpoint is held to the same host allowlist as the browser. */
+export function assertReleaseTarget(config) {
+  if (!config.releaseEndpoint) return;
+  const url = parsedHttpsUrl(String(config.releaseEndpoint), "release_endpoint_invalid");
+  if (productionHostRefused(url.hostname)) {
+    throw new RunnerConfigurationError("production_release_host_refused");
+  }
+  const allowed = Array.isArray(config.networkAllowedHosts) ? config.networkAllowedHosts : [];
+  if (!allowed.includes(url.hostname)) {
+    throw new RunnerConfigurationError("release_target_not_allowlisted");
+  }
+}
+
 export function assertBrowserStagingTarget(config) {
   assertKnownEnvironment(config);
   const allowedHosts = config.networkAllowedHosts;
@@ -202,6 +215,7 @@ export function assertRunnerStagingTargets(config) {
   assertStripeStagingTarget(config);
   assertSupabaseStagingTarget(config);
   assertBrowserStagingTarget(config);
+  assertReleaseTarget(config);
 }
 
 export function readRunnerConfig(env = process.env) {
@@ -272,7 +286,14 @@ export function readRunnerConfig(env = process.env) {
     passwordSelector: required(env, "DROP_OS_PASSWORD_SELECTOR"),
     submitSelector: required(env, "DROP_OS_SUBMIT_SELECTOR"),
     successSelector: required(env, "DROP_OS_SUCCESS_SELECTOR"),
-    browserTimeoutMs: boundedInteger(required(env, "DROP_OS_BROWSER_TIMEOUT_MS"), 1_000, 120_000, "browser_timeout_invalid")
+    browserTimeoutMs: boundedInteger(required(env, "DROP_OS_BROWSER_TIMEOUT_MS"), 1_000, 120_000, "browser_timeout_invalid"),
+    // Optional, and the check says so when it is absent rather than implying a
+    // binding it does not have. When present it must be an HTTPS URL on the same
+    // allowlist the browser is held to, and it must name the commit being checked.
+    releaseEndpoint: String(env.DROP_OS_RELEASE_ENDPOINT ?? "").trim()
+      ? parsedHttpsUrl(String(env.DROP_OS_RELEASE_ENDPOINT).trim(), "release_endpoint_invalid").toString()
+      : "",
+    releaseCommitField: matching(String(env.DROP_OS_RELEASE_COMMIT_FIELD ?? "commit").trim(), /^[A-Za-z_][A-Za-z0-9_]{0,62}$/, "release_commit_field_invalid")
   };
   for (const selector of [config.emailSelector, config.passwordSelector, config.submitSelector, config.successSelector]) {
     if (selector.length > 300 || /[\r\n\0]/.test(selector)) throw new RunnerConfigurationError("browser_selector_invalid");

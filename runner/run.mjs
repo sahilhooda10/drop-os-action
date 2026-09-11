@@ -112,7 +112,7 @@ export function subjectDigest(config) {
   ].join("\n"), "utf8").digest("hex");
 }
 
-export function buildEnvelope(config, observers, startedAt, finishedAt) {
+export function buildEnvelope(config, observers, startedAt, finishedAt, releaseVerified = false) {
   const verdict = claimedVerdict(observers);
   const convergenceAttempt = Number(config.convergenceAttempt ?? 0);
   if (!Number.isInteger(convergenceAttempt) || convergenceAttempt < 0 || convergenceAttempt > 4) {
@@ -129,6 +129,10 @@ export function buildEnvelope(config, observers, startedAt, finishedAt) {
     commitSha: config.commitSha,
     targetEnvironment: config.targetEnvironment,
     subjectDigest: subjectDigest(config),
+    // Whether the application was proven to be serving this exact commit while it
+    // was observed. False means the verdict is about the application that answered,
+    // not about this release, and the workspace says so rather than implying more.
+    releaseVerified: Boolean(releaseVerified),
     verdict,
     reasons: verdict === "PASS" ? ["all_assertions_held"] : [verdict === "CONTRADICTION" ? "observer_values_disagree" : "observer_unavailable"],
     observers,

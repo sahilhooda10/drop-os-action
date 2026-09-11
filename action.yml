@@ -57,6 +57,18 @@ inputs:
   supabase-schema:
     description: Explicit entitlement RPC schema; never inferred from a connection
     default: public
+  release-endpoint:
+    description: >-
+      An HTTPS URL your application already serves that names the commit it is
+      running, on a host in network-hosts. Read before and after the observations;
+      if either reading is not the commit being checked the run is refused rather
+      than reported. Leave empty and the verdict records that it is about the
+      application that answered, not about this release.
+    required: false
+    default: ""
+  release-commit-field:
+    description: JSON field in that response holding the 40-character commit
+    default: commit
   browser-login-url:
     description: Sign-in page of the application being checked
     required: true
@@ -114,6 +126,8 @@ runs:
         DROP_OS_SUPABASE_URL: ${{ inputs.supabase-url }}
         DROP_OS_SUPABASE_SCHEMA: ${{ inputs.supabase-schema }}
         DROP_OS_SUPABASE_RPC: ${{ inputs.supabase-rpc }}
+        DROP_OS_RELEASE_ENDPOINT: ${{ inputs.release-endpoint }}
+        DROP_OS_RELEASE_COMMIT_FIELD: ${{ inputs.release-commit-field }}
         DROP_OS_BROWSER_LOGIN_URL: ${{ inputs.browser-login-url }}
         DROP_OS_BROWSER_ACCESS_URL: ${{ inputs.browser-access-url }}
         DROP_OS_NETWORK_HOSTS: ${{ inputs.network-hosts }}

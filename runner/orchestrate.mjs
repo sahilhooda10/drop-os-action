@@ -1,6 +1,7 @@
 import { collectObservations } from "./observers.mjs";
 import { checkBrowserAccess } from "./browser.mjs";
 import { buildEnvelope, drainNotifications, submitEnvelope } from "./run.mjs";
+import { assertServingAdmittedCommit } from "./release.mjs";
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -25,11 +26,18 @@ export async function executePaidAccessCheck(config, token, dependencies = {}) {
   let result;
   let observers = [];
 
+  const assertServing = dependencies.assertServingAdmittedCommit ?? assertServingAdmittedCommit;
+
   for (let attempt = 0; attempt <= config.convergenceRetries; attempt += 1) {
     const startedAt = new Date(now()).toISOString();
+    // Before: refuse to observe an application that is not serving the commit this
+    // run reports on. After: refuse to report on observations of a release that was
+    // replaced while they were being taken.
+    const releaseVerified = await assertServing(attemptConfig, fetchImpl);
     observers = await collect(attemptConfig, { fetchImpl, checkBrowser: browser });
+    await assertServing(attemptConfig, fetchImpl);
     dependencies.onObservers?.(observers, attempt);
-    const envelope = buildEnvelope(attemptConfig, observers, startedAt, new Date(now()).toISOString());
+    const envelope = buildEnvelope(attemptConfig, observers, startedAt, new Date(now()).toISOString(), releaseVerified);
     result = await submit(attemptConfig, envelope, token, fetchImpl);
     dependencies.onResult?.(result, attempt);
     if (result.lifecycleStatus !== "pending_convergence") break;
