@@ -152,7 +152,22 @@ export async function submitEnvelope(config, envelope, token, fetchImpl = fetch)
     headers: { Authorization: `Bearer ${token}`, "content-type": "application/json", Accept: "application/json" },
     body: JSON.stringify(envelope)
   });
-  if (!response.ok) throw new Error(`dropos_ingestion_refused_${response.status}`);
+  if (!response.ok) {
+    // 402 is a plan decision and 429 is the bound on checks that never reached a
+    // verdict. Neither is a fault in this check, and the only place the customer
+    // will look is this job's log. DROP OS's refusal bodies are value-free by
+    // construction — `lib/admission/errors.ts` has no field for the offending
+    // value — so the code and the sentence are safe to print, and printing them is
+    // the difference between "402" and "your trial has ended".
+    if (response.status === 402 || response.status === 429) {
+      const refusal = await readBoundedJson(response, 4_096).catch(() => null);
+      const fallback = response.status === 402 ? "payment_required" : "too_many_requests";
+      const code = typeof refusal?.code === "string" ? refusal.code : fallback;
+      const detail = typeof refusal?.detail === "string" ? refusal.detail : "";
+      throw new Error(`dropos_checks_paused: ${code}${detail ? ` — ${detail}` : ""}`);
+    }
+    throw new Error(`dropos_ingestion_refused_${response.status}`);
+  }
   const result = await readBoundedJson(response, 16_384);
   if (
     !result ||
