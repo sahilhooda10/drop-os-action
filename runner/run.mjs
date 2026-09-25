@@ -1,8 +1,24 @@
 import { createHash } from "node:crypto";
 import { readBoundedJson, safeFetch } from "./http.mjs";
-import { assertIngressStagingTarget } from "./config.mjs";
+import { assertIngressStagingTarget, RunnerConfigurationError } from "./config.mjs";
 
 export const OIDC_AUDIENCE = "dropos-truth-v1";
+
+/**
+ * A refusal DROP OS itself returned. Its code and sentence come from
+ * `lib/admission/errors.ts`, which has no field for an offending value, so they are
+ * safe to print in full — and printing them is the difference between
+ * "dropos_ingestion_refused_403" and "this check is configured against a different
+ * price than the one this project has reported on".
+ */
+export class DropOsRefusal extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "DropOsRefusal";
+  }
+}
+
+const printable = value => String(value).replace(/[\u0000-\u001f\u007f]+/g, " ").trim().slice(0, 400);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function githubOidcRequestUrl(value) {
@@ -155,18 +171,17 @@ export async function submitEnvelope(config, envelope, token, fetchImpl = fetch)
   if (!response.ok) {
     // 402 is a plan decision and 429 is the bound on checks that never reached a
     // verdict. Neither is a fault in this check, and the only place the customer
-    // will look is this job's log. DROP OS's refusal bodies are value-free by
-    // construction — `lib/admission/errors.ts` has no field for the offending
-    // value — so the code and the sentence are safe to print, and printing them is
-    // the difference between "402" and "your trial has ended".
+    // will look is this job's log. Every other refusal — a pinned subject, a
+    // workflow or branch the binding does not allow — is a setup fact the customer
+    // can act on, and it used to reach them as a bare status code.
+    const refusal = await readBoundedJson(response, 4_096).catch(() => null);
+    const code = typeof refusal?.code === "string" && /^[a-z0-9_]{1,80}$/.test(refusal.code) ? refusal.code : null;
+    const detail = typeof refusal?.detail === "string" ? printable(refusal.detail) : "";
     if (response.status === 402 || response.status === 429) {
-      const refusal = await readBoundedJson(response, 4_096).catch(() => null);
       const fallback = response.status === 402 ? "payment_required" : "too_many_requests";
-      const code = typeof refusal?.code === "string" ? refusal.code : fallback;
-      const detail = typeof refusal?.detail === "string" ? refusal.detail : "";
-      throw new Error(`dropos_checks_paused: ${code}${detail ? ` — ${detail}` : ""}`);
+      throw new DropOsRefusal(`dropos_checks_paused: ${code ?? fallback}${detail ? ` — ${detail}` : ""}`);
     }
-    throw new Error(`dropos_ingestion_refused_${response.status}`);
+    throw new DropOsRefusal(`dropos_ingestion_refused_${response.status}${code ? `: ${code}` : ""}${detail ? ` — ${detail}` : ""}`);
   }
   const result = await readBoundedJson(response, 16_384);
   if (
@@ -217,4 +232,51 @@ export async function drainNotifications(config, token, runId, fetchImpl = fetch
     throw new Error("dropos_notification_response_invalid");
   }
   return result;
+}
+
+/**
+ * What the job log says when the runner stops. A refusal DROP OS returned is
+ * value-free by construction and is printed whole. Anything else may carry a
+ * provider message, so only a bare code survives — with a sentence beside it for
+ * the configuration mistakes a first setup actually makes.
+ */
+export function describeRunnerFailure(error) {
+  if (error instanceof DropOsRefusal) {
+    const message = printable(error.message);
+    return {
+      annotation: `::error title=DROP OS refused this check::${message}`,
+      line: `DROP OS runner failed: ${message}`
+    };
+  }
+  const code = error instanceof RunnerConfigurationError ? error.code : String(error?.message || "runner_failed");
+  const safe = /^[a-z0-9_.:-]{1,100}$/.test(code) ? code : "runner_failed";
+  const hint = explainRunnerCode(safe);
+  return {
+    annotation: hint ? `::error title=DROP OS check not run::${hint} (${safe})` : null,
+    line: `DROP OS runner failed: ${safe}`
+  };
+}
+
+function explainRunnerCode(code) {
+  if (code.startsWith("configuration_missing:")) {
+    return `The workflow is missing ${code.slice("configuration_missing:".length).toUpperCase()}. Add the Actions secret or the workflow input it names.`;
+  }
+  return {
+    stripe_key_not_restricted: "DROP_OS_STRIPE_RESTRICTED_KEY is a full secret key (sk_). Create a restricted key (rk_) with Subscriptions: Read and nothing else.",
+    stripe_key_not_test_restricted: "A staging check needs a TEST-mode restricted Stripe key (rk_test_) in DROP_OS_STRIPE_RESTRICTED_KEY.",
+    stripe_key_not_live_restricted: "A production check needs a LIVE-mode restricted Stripe key (rk_live_) in DROP_OS_STRIPE_RESTRICTED_KEY.",
+    supabase_key_not_publishable: "DROP_OS_SUPABASE_PUBLISHABLE_KEY must be the publishable key that starts sb_publishable_ (Supabase, Project Settings, API Keys). The legacy anon key is not accepted.",
+    supabase_project_ref_invalid: "supabase-project-ref must be the 20-character reference from https://<reference>.supabase.co.",
+    network_host_allowlist_incomplete: "network-hosts must include your app's host and <reference>.supabase.co.",
+    network_host_allowlist_invalid: "network-hosts must be hostnames only, separated by commas — no https:// and no paths.",
+    browser_targets_not_same_origin: "browser-login-url and browser-access-url must be on the same https origin.",
+    browser_target_not_allowlisted: "Add the host of browser-login-url and browser-access-url to network-hosts.",
+    release_target_not_allowlisted: "Add the host of release-endpoint to network-hosts.",
+    browser_selector_invalid: "success-selector must be one CSS selector.",
+    release_endpoint_unreadable: "release-endpoint did not answer. Check the path serves JSON, and that the deployment is not behind Vercel Deployment Protection, which the check cannot pass.",
+    release_response_invalid: "release-endpoint must answer with a JSON object.",
+    release_commit_invalid: "The JSON from release-endpoint has no full commit SHA in release-commit-field.",
+    release_not_serving_admitted_commit: "The app is not serving the commit this check is for — the deployment may not have finished, or release-endpoint reports a different commit. The next deployment starts a new check.",
+    node_22_required: "The runner needs Node 22 or newer. Use a GitHub-hosted ubuntu-latest runner."
+  }[code] ?? null;
 }

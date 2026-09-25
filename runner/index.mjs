@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { readRunnerConfig, RunnerConfigurationError } from "./config.mjs";
-import { requestOidcToken } from "./run.mjs";
+import { readRunnerConfig } from "./config.mjs";
+import { describeRunnerFailure, requestOidcToken } from "./run.mjs";
 import { executePaidAccessCheck } from "./orchestrate.mjs";
 
 function mask(value) {
@@ -40,8 +40,8 @@ async function main() {
 }
 
 main().catch(error => {
-  const code = error instanceof RunnerConfigurationError ? error.code : String(error?.message || "runner_failed");
-  const safe = /^[a-z0-9_.:-]{1,100}$/.test(code) ? code : "runner_failed";
-  process.stderr.write(`DROP OS runner failed: ${safe}\n`);
+  const { annotation, line } = describeRunnerFailure(error);
+  if (annotation) process.stdout.write(`${annotation}\n`);
+  process.stderr.write(`${line}\n`);
   process.exitCode = 1;
 });

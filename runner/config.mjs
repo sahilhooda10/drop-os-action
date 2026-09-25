@@ -15,12 +15,35 @@ const SUPABASE_PUBLISHABLE_KEY = /^sb_publishable_[A-Za-z0-9_-]{16,}$/;
 const SUPABASE_PROJECT_REF = /^[a-z0-9]{20}$/;
 const PRODUCTION_SUPABASE_PROJECT_REF = "zuvxiosuhqpsczjimwwl";
 const DNS_HOSTNAME = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
-const PRODUCTION_INGRESS_HOSTS = new Set([
+/**
+ * Two different refusals that used to be one set, separated because the domain moved.
+ *
+ * When `www.dropos.co` served DROP OS, one set answered both questions. It now 308s to
+ * `truth.dropos.co`, and a single set can no longer be right for both: the host a check
+ * SUBMITS to and the host a check may BROWSE are now opposites.
+ *
+ * SUBMISSION — the retired estate only. `truth.dropos.co` is deliberately ABSENT and must
+ * stay absent: it is where every real customer check submits, so adding it here would
+ * refuse the entire product with `production_ingress_host_refused`. These three are the
+ * hosts a runner must never post evidence to.
+ */
+const RETIRED_DROP_OS_HOSTS = new Set([
   "www.dropos.co",
   "dropos.co",
   "drop-os-opal.vercel.app"
 ]);
-const PRODUCTION_DROP_OS_HOSTS = PRODUCTION_INGRESS_HOSTS;
+
+/**
+ * BROWSING — the retired estate PLUS the live product.
+ *
+ * The browser journey, its network allowlist and the release endpoint all describe the
+ * CUSTOMER's application. Aiming any of them at DROP OS itself is always a
+ * misconfiguration: it would drive a headless browser at our own live site with a
+ * customer's test credentials and check that DROP OS grants access, which answers
+ * nothing about their app. Before the move `www.dropos.co` covered this; afterwards the
+ * guard named three hosts, none of which was the live one, and so it stopped guarding.
+ */
+const DROP_OS_OWN_HOSTS = new Set([...RETIRED_DROP_OS_HOSTS, "truth.dropos.co"]);
 
 export class RunnerConfigurationError extends Error {
   constructor(code) {
@@ -88,8 +111,14 @@ function exactHostnameAllowlist(value, code) {
 const ingressHosts = value => exactHostnameAllowlist(value, "ingress_host_allowlist_invalid");
 const networkHosts = value => exactHostnameAllowlist(value, "network_host_allowlist_invalid");
 
+/** Submission targets: the retired estate, and our production database either way. */
 function productionHostRefused(host) {
-  return PRODUCTION_DROP_OS_HOSTS.has(host) || host.includes(PRODUCTION_SUPABASE_PROJECT_REF);
+  return RETIRED_DROP_OS_HOSTS.has(host) || host.includes(PRODUCTION_SUPABASE_PROJECT_REF);
+}
+
+/** Browse/release targets: everything above, plus the live product itself. */
+function dropOsOwnHostRefused(host) {
+  return DROP_OS_OWN_HOSTS.has(host) || host.includes(PRODUCTION_SUPABASE_PROJECT_REF);
 }
 
 function parsedHttpsUrl(value, code) {
@@ -170,7 +199,7 @@ export function assertSupabaseStagingTarget(config) {
 export function assertReleaseTarget(config) {
   if (!config.releaseEndpoint) return;
   const url = parsedHttpsUrl(String(config.releaseEndpoint), "release_endpoint_invalid");
-  if (productionHostRefused(url.hostname)) {
+  if (dropOsOwnHostRefused(url.hostname)) {
     throw new RunnerConfigurationError("production_release_host_refused");
   }
   const allowed = Array.isArray(config.networkAllowedHosts) ? config.networkAllowedHosts : [];
@@ -187,12 +216,12 @@ export function assertBrowserStagingTarget(config) {
       new Set(allowedHosts).size !== allowedHosts.length) {
     throw new RunnerConfigurationError("network_host_allowlist_invalid");
   }
-  if (allowedHosts.some(productionHostRefused)) {
+  if (allowedHosts.some(dropOsOwnHostRefused)) {
     throw new RunnerConfigurationError("production_network_host_refused");
   }
   const login = parsedHttpsUrl(String(config.browserLoginUrl ?? ""), "browser_login_url_invalid");
   const access = parsedHttpsUrl(String(config.browserAccessUrl ?? ""), "browser_access_url_invalid");
-  if (productionHostRefused(login.hostname) || productionHostRefused(access.hostname)) {
+  if (dropOsOwnHostRefused(login.hostname) || dropOsOwnHostRefused(access.hostname)) {
     throw new RunnerConfigurationError("production_browser_host_refused");
   }
   if (login.origin !== access.origin) {

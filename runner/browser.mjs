@@ -117,6 +117,24 @@ async function evaluate(cdp, source, sessionId) {
   return result?.result?.value;
 }
 
+/**
+ * Name, in the customer's own CI log, the host a refused request was going to. It is
+ * the customer's app, CDN or provider — the thing they must add to network-hosts —
+ * and before this every guess at it cost a whole check. Printed only; it never
+ * enters what is sent to DROP OS, which stays value-free.
+ */
+const reportedHosts = new Set();
+function reportRefusedRequest(event) {
+  let host;
+  try { host = new URL(String(event?.request?.url ?? "")).hostname; } catch { return; }
+  if (!/^[a-z0-9.-]{1,253}$/i.test(host) || reportedHosts.has(host) || reportedHosts.size >= 5) return;
+  reportedHosts.add(host);
+  const page = event?.resourceType === "Document";
+  process.stdout.write(page
+    ? `::warning title=DROP OS blocked a page from ${host}::A document from ${host} was blocked because it is not in network-hosts, so this check cannot finish. Either the browser was sent there, or the page embeds it (an iframe). If your protected page redirected the test customer there — a checkout, pricing or upgrade page — your app treated the paying test customer as unpaid. If it is an embed your page needs, add it to network-hosts.\n`
+    : `::warning title=DROP OS blocked a request to ${host}::${host} is not in network-hosts. If your login or protected page needs it, add it to network-hosts in the workflow.\n`);
+}
+
 function allowedBrowserRequest(allowedHosts, rawUrl) {
   let url;
   try { url = new URL(rawUrl); } catch { return false; }
@@ -307,6 +325,7 @@ export async function installBrowserRequestBoundary(cdp, config) {
         await cdp.send("Fetch.continueRequest", { requestId: event.requestId }, sessionId);
         return;
       }
+      reportRefusedRequest(event);
       unsafe();
       await cdp.send("Fetch.failRequest", {
         requestId: event.requestId,
